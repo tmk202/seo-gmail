@@ -10,6 +10,27 @@ datasource db {
   provider  = "postgresql"
 }
 
+enum AccountStatus {
+  AVAILABLE
+  SOLD
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  DELIVERED
+}
+
+model User {
+  id             String    @id @default(uuid())
+  email          String    @unique
+  password       String
+  name           String?
+  orders         Order[]
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
 model Product {
   id          String   @id @default(uuid())
   name        String
@@ -42,6 +63,8 @@ model Order {
   quantity       Int       @default(1)
   productId      String
   product        Product   @relation(fields: [productId], references: [id])
+  userId         String?
+  user           User?     @relation(fields: [userId], references: [id])
   status         OrderStatus @default(PENDING)
   items          OrderItem[]
   createdAt      DateTime  @default(now())
@@ -55,15 +78,4 @@ model OrderItem {
   accountId      String     @unique
   account        Account   @relation(fields: [accountId], references: [id], onDelete: Restrict)
   createdAt      DateTime  @default(now())
-}
-
-enum AccountStatus {
-  AVAILABLE
-  SOLD
-}
-
-enum OrderStatus {
-  PENDING
-  PAID
-  DELIVERED
 }

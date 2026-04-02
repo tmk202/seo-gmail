@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getAuthUser } from '@/lib/auth';
 
 // Sinh mã đơn hàng gồm 8 ký tự alphanumeric (VD: ANTI-A1B2C3D4)
 function generateOrderCode(): string {
@@ -13,6 +14,10 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { productId, quantity, customerEmail } = body;
+
+    // Check auth
+    const user = await getAuthUser();
+    const userId = user?.id as string | undefined;
 
     // Validate input
     if (!productId || !quantity || !customerEmail) {
@@ -84,6 +89,7 @@ export async function POST(req: NextRequest) {
         quantity,
         productId,
         status: 'PENDING',
+        userId: userId || null, // Lưu ID nếu khách đã đăng nhập
       },
     });
 
