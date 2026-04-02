@@ -3,10 +3,10 @@ name: 🚀 Deploy to Vercel
 on:
   push:
     branches:
-      - main        # Deploy Production khi push lên main
+      - master        # Deploy Production khi push lên master
   pull_request:
     branches:
-      - main        # Deploy Preview khi tạo Pull Request
+      - master        # Deploy Preview khi tạo Pull Request
 
 jobs:
   deploy:
