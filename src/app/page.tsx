@@ -7,8 +7,20 @@ export default function Home() {
   const [user, setUser] = useState<any>(null);
 
   useEffect(() => {
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) setUser(JSON.parse(storedUser));
+    async function fetchSession() {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.authenticated) {
+            setUser(data.user);
+          }
+        }
+      } catch (err) {
+        // failed to fetch session
+      }
+    }
+    fetchSession();
   }, []);
 
   const products = [

@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { GoogleOAuthProvider, GoogleLogin } from '@react-oauth/google';
 
 export default function RegisterPage() {
   const [email, setEmail] = useState('');
@@ -11,6 +12,28 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const router = useRouter();
+
+  async function handleGoogleSuccess(credentialResponse: any) {
+    setLoading(true);
+    setError('');
+    
+    try {
+      const res = await fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: credentialResponse.credential }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      router.push('/dashboard');
+      router.refresh();
+    } catch (err: any) {
+      setError(err.message);
+      setLoading(false);
+    }
+  }
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
@@ -36,6 +59,7 @@ export default function RegisterPage() {
   }
 
   return (
+    <GoogleOAuthProvider clientId={process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ''}>
     <main className="min-h-screen bg-[#050510] flex items-center justify-center p-4 selection:bg-indigo-500/30">
       {/* Subtle background glow */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
@@ -45,11 +69,27 @@ export default function RegisterPage() {
 
       <div className="w-full max-w-[480px] z-10">
         <div className="bg-[#0f0f1a] border border-white/[0.08] rounded-[2.5rem] p-8 md:p-12 shadow-2xl shadow-black/50">
-          <div className="text-center mb-10">
+          <div className="text-center mb-8">
             <h1 className="text-3xl font-bold text-white tracking-tight leading-tight">
               Tạo tài khoản mới
             </h1>
-            <p className="text-gray-500 mt-3 font-medium">Bắt đầu quản lý Gmail của bạn chuyên nghiệp hơn.</p>
+            <p className="text-gray-500 mt-2 font-medium">Bắt đầu quản lý Gmail của bạn chuyên nghiệp hơn.</p>
+          </div>
+
+          <div className="flex justify-center mb-6">
+            <GoogleLogin
+              onSuccess={handleGoogleSuccess}
+              onError={() => setError('Google Authentication Failed')}
+              theme="filled_black"
+              shape="pill"
+              text="continue_with"
+            />
+          </div>
+
+          <div className="flex items-center gap-4 mb-6">
+            <div className="h-px bg-white/10 flex-1"></div>
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">Hoặc đăng ký Email</span>
+            <div className="h-px bg-white/10 flex-1"></div>
           </div>
 
           {error && (
@@ -114,5 +154,6 @@ export default function RegisterPage() {
         </div>
       </div>
     </main>
+    </GoogleOAuthProvider>
   );
 }

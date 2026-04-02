@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { GoogleOAuthProvider, GoogleLogin } from '@react-oauth/google';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -10,6 +11,29 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const router = useRouter();
+
+  async function handleGoogleSuccess(credentialResponse: any) {
+    setLoading(true);
+    setError('');
+    
+    try {
+      const res = await fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: credentialResponse.credential }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      router.push('/dashboard');
+      router.refresh();
+    } catch (err: any) {
+      setError(err.message);
+      setLoading(false);
+    }
+  }
+
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -35,6 +59,7 @@ export default function LoginPage() {
   }
 
   return (
+    <GoogleOAuthProvider clientId={process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ''}>
     <main className="min-h-screen bg-[#050510] flex items-center justify-center p-4 selection:bg-indigo-500/30">
       {/* Subtle background glow */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
@@ -44,13 +69,29 @@ export default function LoginPage() {
 
       <div className="w-full max-w-[440px] z-10">
         <div className="bg-[#0f0f1a] border border-white/[0.08] rounded-[3rem] p-8 md:p-14 shadow-2xl shadow-black/80">
-          <div className="text-center mb-12">
+          <div className="text-center mb-10">
             <h1 className="text-4xl font-bold text-white tracking-tight leading-tight mb-4">
               Chào mừng trở lại
             </h1>
             <p className="text-gray-500 font-medium md:text-lg">
               Đăng nhập để quản lý tài khoản của bạn.
             </p>
+          </div>
+
+          <div className="flex justify-center mb-8">
+            <GoogleLogin
+              onSuccess={handleGoogleSuccess}
+              onError={() => setError('Google Authentication Failed')}
+              theme="filled_black"
+              shape="pill"
+              text="continue_with"
+            />
+          </div>
+
+          <div className="flex items-center gap-4 mb-8">
+            <div className="h-px bg-white/10 flex-1"></div>
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">Hoặc dùng Email</span>
+            <div className="h-px bg-white/10 flex-1"></div>
           </div>
 
           {error && (
@@ -105,5 +146,6 @@ export default function LoginPage() {
         </div>
       </div>
     </main>
+    </GoogleOAuthProvider>
   );
 }

@@ -36,8 +36,11 @@ export default async function DashboardPage() {
           <Link href="/" className="text-2xl font-black bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent italic">
             ANTIGRAVITY
           </Link>
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4">
             <span className="text-sm text-gray-400 hidden sm:inline">Chào, <span className="text-white font-medium">{String(userPayload.email)}</span></span>
+            <Link href="/settings" className="text-xs bg-white/5 hover:bg-white/10 text-gray-300 px-4 py-2 rounded-lg border border-white/10 transition-all">
+              ⚙️ Cài đặt
+            </Link>
             <form action="/api/auth/logout" method="POST">
               <button type="submit" className="text-xs bg-red-500/10 hover:bg-red-500/20 text-red-500 px-4 py-2 rounded-lg border border-red-500/20 transition-all">
                 Đăng Xuất
