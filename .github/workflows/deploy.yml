@@ -1,0 +1,53 @@
+name: 🚀 Deploy to Vercel
+
+on:
+  push:
+    branches:
+      - main        # Deploy Production khi push lên main
+  pull_request:
+    branches:
+      - main        # Deploy Preview khi tạo Pull Request
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout code
+      - name: ⬇️ Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Cài đặt Node.js
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # 3. Cài dependencies (bao gồm chạy postinstall → prisma generate)
+      - name: 📦 Install dependencies
+        run: npm ci
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      # 4. Build kiểm tra — phát hiện lỗi TypeScript/Next trước khi deploy
+      - name: 🔨 Build Next.js
+        run: npm run build
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          SEPAY_API_TOKEN: ${{ secrets.SEPAY_API_TOKEN }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+
+      # 5. Deploy lên Vercel
+      - name: 🚀 Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: ${{ github.ref == 'refs/heads/main' && '--prod' || '' }}
+          working-directory: ./
