@@ -9,10 +9,10 @@ interface AccountRow {
   recoveryEmail: string | null;
 }
 
+// Hàm xuất kho (fulfillment)
 async function fulfillOrder(orderId: string, productId: string, quantity: number): Promise<AccountRow[]> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return await prisma.$transaction(async (tx: any) => {
-    // SELECT ... FOR UPDATE SKIP LOCKED — chống race condition khi 2 khách mua cùng lúc
+  return await prisma.$transaction(async (tx) => {
+    // SELECT ... FOR UPDATE SKIP LOCKED
     const accounts = await tx.$queryRaw<AccountRow[]>`
       SELECT id, email, password, "recoveryEmail"
       FROM "Account"
@@ -51,7 +51,7 @@ async function fulfillOrder(orderId: string, productId: string, quantity: number
 
 export async function POST(req: NextRequest) {
   try {
-    // Xác thực Bearer token từ SePay
+    // 1. Xác thực Auth Token
     const authHeader = req.headers.get('Authorization');
     const expectedToken = process.env.SEPAY_API_TOKEN;
 
@@ -62,68 +62,126 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
 
-    // Chỉ xử lý tiền VÀO
+    // Chỉ xử lý các giao dịch TIỀN VÀO (inbound)
     if (body.transferType !== 'in') {
       return NextResponse.json({ success: true, message: 'Ignored: outbound transfer' });
     }
 
     const content: string = body.content ?? '';
-    const amount: number = body.transferAmount ?? 0;
+    const amount: number = Number(body.transferAmount) ?? 0;
+    const transactionId: string = body.id ?? ''; // ID của SePay
+    const bankAccount: string = body.bankAccount ?? '';
 
-    // Tìm mã đơn hàng trong nội dung chuyển khoản (VD: ANTI-A1B2C3D4)
+    // 2. Ghi nhận giao dịch vào bảng Transaction (Đối soát)
+    const transactionRecord = await prisma.transaction.create({
+      data: {
+        transactionId,
+        transferAmount: amount,
+        content,
+        bankAccount,
+        gateway: 'SEPAY',
+      },
+    });
+
+    // 3. Tìm mã đơn hàng từ nội dung (VD: ANTI-A1B2C3D4)
     const match = content.match(/ANTI-[A-Z0-9]{8}/i);
     if (!match) {
-      return NextResponse.json({ success: true, message: 'Ignored: no order code found' });
+      await prisma.systemLog.create({
+        data: {
+          level: 'WARNING',
+          source: 'WEBHOOK',
+          message: `Giao dịch không có mã đơn hàng: ${content}`,
+          details: JSON.stringify(body),
+        },
+      });
+      return NextResponse.json({ success: true, message: 'No order code' });
     }
     const orderCode = match[0].toUpperCase();
 
-    // Tìm đơn hàng
+    // Gắn transaction vào orderCode nếu có
+    await prisma.transaction.update({
+      where: { id: transactionRecord.id },
+      data: { orderCode },
+    });
+
+    // 4. Tìm kiếm đơn hàng
     const order = await prisma.order.findUnique({
       where: { orderCode },
       include: { product: true },
     });
 
     if (!order) {
-      // LUÔN LUÔN trả về 200 cho SePay để tránh webhook bị retry liên tục
-      // Đồng thời ngăn hacker dùng webhook đoán mã đơn hàng có tồn tại hay không.
-      console.warn(`[Webhook SePay] Order not found: ${orderCode}`);
-      return NextResponse.json({ success: false, message: 'Order not found' }, { status: 200 });
+      await prisma.systemLog.create({
+        data: {
+          level: 'ERROR',
+          source: 'WEBHOOK',
+          message: `Không tìm thấy đơn hàng tương ứng mã: ${orderCode}`,
+          details: JSON.stringify(body),
+        },
+      });
+      return NextResponse.json({ success: false, message: 'Order not found' });
     }
 
-    // Đã xử lý rồi → idempotent
+    // 5. Kiểm tra trạng thái đơn
     if (order.status !== 'PENDING') {
-      return NextResponse.json({ success: true, message: `Already ${order.status}` });
+      return NextResponse.json({ success: true, message: `Skipped: status is ${order.status}` });
     }
 
-    // Số tiền nhận được phải >= tổng đơn
+    // 6. Kiểm tra số tiền
     if (amount < order.totalAmount) {
-      console.warn(`[Webhook SePay] Amount mismatch: received ${amount}, expected ${order.totalAmount}`);
-      return NextResponse.json({ success: true, message: 'Ignored: insufficient amount' });
+      await prisma.systemLog.create({
+        data: {
+          level: 'ERROR',
+          source: 'WEBHOOK',
+          message: `Đơn ${orderCode}: Chuyển thiếu tiền. Nhận ${amount}, cần ${order.totalAmount}`,
+          details: JSON.stringify(body),
+        },
+      });
+      return NextResponse.json({ success: true, message: 'Insufficient amount logged' });
     }
 
-    // Đặt PAID ngay (atomic update — nếu 2 webhook gọi đồng thời, chỉ 1 cái update được)
+    // 7. Cập nhật trạng thái PAID ngay (Idempotent)
     const updated = await prisma.order.updateMany({
       where: { orderCode, status: 'PENDING' },
       data: { status: 'PAID' },
     });
 
     if (updated.count === 0) {
-      return NextResponse.json({ success: true, message: 'Concurrent request ignored' });
+      return NextResponse.json({ success: true, message: 'Concurrent request handled' });
     }
 
-    // Xuất kho & gửi email
+    // 8. Xuất kho & giao hàng
     let deliveredAccounts: AccountRow[] = [];
     try {
       deliveredAccounts = await fulfillOrder(order.id, order.productId, order.quantity);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error';
-      console.error('[Webhook SePay] Fulfill failed:', msg);
-      // Giữ status 200 nhưng log lỗi
-      await prisma.order.update({ where: { id: order.id }, data: { status: 'PAID' } });
-      return NextResponse.json({ success: false, error: `Fulfill error: ${msg}` }, { status: 200 });
+      
+      // Log thành công
+      await prisma.systemLog.create({
+        data: {
+          level: 'INFO',
+          source: 'WEBHOOK',
+          message: `Đơn ${orderCode}: Giao hàng thành công (x${order.quantity} accs).`,
+          details: `Product: ${order.product.name} | Customer: ${order.customerEmail}`,
+        },
+      });
+    } catch (fulfillErr: any) {
+      const msg = fulfillErr.message || 'Unknown fulfillment error';
+      console.error('[Webhook SePay] Fulfillment failed:', msg);
+      
+      // LOG ERROR critically! Hết hàng hoặc lỗi DB!
+      await prisma.systemLog.create({
+        data: {
+          level: 'ERROR',
+          source: 'WEBHOOK',
+          message: `Đơn ${orderCode}: Thanh toán OK nhưng XUẤT KHO THẤT BẠI. Lý do: ${msg}`,
+          details: JSON.stringify(body),
+        },
+      });
+      
+      return NextResponse.json({ success: false, error: msg }, { status: 200 });
     }
 
-    // Gửi email (không block nếu lỗi)
+    // 9. Gửi Email thông báo
     try {
       await sendAccountEmail({
         toEmail: order.customerEmail,
@@ -132,13 +190,13 @@ export async function POST(req: NextRequest) {
         accounts: deliveredAccounts,
       });
     } catch (emailErr) {
-      console.error('[Webhook SePay] Email failed (non-fatal):', emailErr);
+      console.error('[Webhook SePay] Email failed (Non-fatal):', emailErr);
     }
 
-    console.log(`[Webhook SePay] ✅ Order ${orderCode} fulfilled.`);
     return NextResponse.json({ success: true, orderCode });
-  } catch (err) {
-    console.error('[Webhook SePay] Unexpected error:', err);
-    return NextResponse.json({ success: false, error: 'Internal error' }, { status: 200 });
+  } catch (err: any) {
+    console.error('[Webhook SePay] Global Error:', err);
+    return NextResponse.json({ success: false, error: 'Internal Error' }, { status: 200 });
   }
 }
+

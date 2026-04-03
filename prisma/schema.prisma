@@ -21,6 +21,19 @@ enum OrderStatus {
   DELIVERED
 }
 
+enum LogLevel {
+  INFO
+  WARNING
+  ERROR
+}
+
+enum LogSource {
+  WEBHOOK
+  AUTH
+  INTERNAL
+}
+
+
 model User {
   id             String    @id @default(uuid())
   email          String    @unique
@@ -68,8 +81,30 @@ model Order {
   user           User?     @relation(fields: [userId], references: [id])
   status         OrderStatus @default(PENDING)
   items          OrderItem[]
+  transactions   Transaction[]
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+}
+
+model Transaction {
+  id              String   @id @default(uuid())
+  gateway         String   @default("SEPAY")
+  transactionId   String?  // Mã giao dịch từ Gateway (SePay)
+  transferAmount  Int
+  content         String
+  bankAccount     String?
+  orderCode       String?
+  order           Order?   @relation(fields: [orderCode], references: [orderCode])
+  createdAt       DateTime @default(now())
+}
+
+model SystemLog {
+  id        String   @id @default(uuid())
+  level     LogLevel @default(INFO)
+  source    LogSource @default(INTERNAL)
+  message   String
+  details   String?  // JSON stringified hoặc chi tiết thêm
+  createdAt DateTime @default(now())
 }
 
 model OrderItem {
@@ -80,3 +115,4 @@ model OrderItem {
   account        Account   @relation(fields: [accountId], references: [id], onDelete: Restrict)
   createdAt      DateTime  @default(now())
 }
+
